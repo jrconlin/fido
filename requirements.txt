@@ -1,0 +1,7 @@
+numpy
+paho-mqtt
+pillow
+requests
+RPi.GPIO
+spidev
+st7789

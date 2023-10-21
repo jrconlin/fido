@@ -3,15 +3,9 @@ import json
 import requests
 import logging
 import os
-<<<<<<< HEAD
 import time
 
 from io import BytesIO
-=======
-
-from io import BytesIO
-from time import sleep
->>>>>>> a8162cd6e6360c11f0093734e4974d17f94a82d4
 from PIL import Image
 from ST7789 import ST7789
 
@@ -59,15 +53,10 @@ Wiring:
     rst -> brown  -> 22 (GPIO25)
     bl  -> gray   -> 33 (GPIO33)
 
-    
 """
 
 
-<<<<<<< HEAD
 def show_img(camera, attention=2):
-=======
-def show_img(camera):
->>>>>>> a8162cd6e6360c11f0093734e4974d17f94a82d4
     """Show the latest snapshot from frigate for this camera"""
     log.debug(f"Getting image for {camera}")
     # fetch the image from my local Frigate server
@@ -80,12 +69,8 @@ def show_img(camera):
     # My camera generates an image larger than we need, crop it down
     # to just the right hand side, since that's the interesting bit.
     cropped = img.crop(CROP).resize((WIDTH, HEIGHT))
-<<<<<<< HEAD
     log.info(f"""Woof: {camera}:: {time.strftime("%D %T")}""")
     log.debug(f"Woof: Image format: {img.format}, cropped to {cropped.size}")
-=======
-    log.debug(f"Image format: {cropped.format}, size {cropped.size}")
->>>>>>> a8162cd6e6360c11f0093734e4974d17f94a82d4
     if display:
         # `display()` REALLY wants a PIL object. You could rewrite
         # it to take a Wand object, I suppose, but meh...
@@ -94,11 +79,7 @@ def show_img(camera):
         display.set_backlight(1)
         # Long enough for me to notice and squint at it to see if
         # it's worth paying attention to.
-<<<<<<< HEAD
         time.sleep(attention)
-=======
-        sleep(10)
->>>>>>> a8162cd6e6360c11f0093734e4974d17f94a82d4
         display.set_backlight(0)
     else:
         cropped.show()
@@ -106,10 +87,7 @@ def show_img(camera):
 
 def on_connect(client, _userdata, _flags, _rc):
     """Get all the events, we can parse out the more interesting ones"""
-<<<<<<< HEAD
     log.info("Connected to MQTT, subscribing...")
-=======
->>>>>>> a8162cd6e6360c11f0093734e4974d17f94a82d4
     client.subscribe("frigate/events")
 
 
@@ -119,7 +97,6 @@ def on_message(client, _userdata, msg):
     # Either get the "before" or "after". After usually has the info about the image.
     after = payload.get("after")
     if after:
-<<<<<<< HEAD
         log.debug(
             f"""Got message {after.get("label","")}, {after.get("current_zones")}"""
         )
@@ -130,6 +107,8 @@ def on_message(client, _userdata, msg):
             if "fido" in after.get("current_zones"):
                 attention = 2
             if "front_door" in after.get("current_zones"):
+                attention = 10
+            if camera == "office":
                 attention = 10
             if camera == "living_room" and not attention:
                 log.debug("it's not that interesting")
@@ -143,17 +122,6 @@ log = logging.getLogger("fido")
 logging.basicConfig(
     level=getattr(logging, os.environ.get("PYTHON_LOG", "ERROR").upper(), None)
 )
-=======
-        if after["label"] == "person" and after["has_snapshot"]:
-            camera = after["camera"]
-            show_img(camera)
-
-
-# main
-log = logging.getLogger(__name__)
-level = os.environ.get("PYTHON_LOG", "ERROR")
-log.setLevel(os.environ.get("PYTHON_LOG", "ERROR"))
->>>>>>> a8162cd6e6360c11f0093734e4974d17f94a82d4
 log.info("Starting up...")
 display = ST7789(
     port=0,
@@ -173,11 +141,7 @@ display.set_backlight(0)
 # log.info("Pulling a test image")
 # show_img("living_room")
 
-<<<<<<< HEAD
 log.info(f"Starting up MQTT {MQTT_CREDS}")
-=======
-log.info("Starting up MQTT")
->>>>>>> a8162cd6e6360c11f0093734e4974d17f94a82d4
 client = mqtt.Client()
 client.scr = display
 client.on_connect = on_connect

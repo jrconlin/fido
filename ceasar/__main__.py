@@ -1,13 +1,14 @@
-import paho.mqtt.client as mqtt
+import paho.mqtt.client as client
+import paho.mqtt.publish as publish
 import json
 import requests
 import logging
 import os
 import time
+import base64
 
 from io import BytesIO
 from PIL import Image
-from ST7789 import ST7789
 
 # My display is 1.2 inches
 WIDTH = 320
@@ -15,47 +16,24 @@ HEIGHT = 240
 # My camera makes a larger image than we need, so
 # crop it down to just the right side.
 CROP = (106, 0, 426, 240)
-MQTT_HOST = "10.10.1.110"
-MQTT_CREDS = (os.environ.get("USER", "USERNAME"), os.environ.get("PASS", "Pa55W0rd"))
+MQTT_HOST = os.environ.get("MQTT_HOST", "10.10.1.110")
+MQTT_USER = os.environ.get("MQTT_USER", "username")
+MQTT_PASS = os.environ.get("MQTT_PASS", "Pa55W0rd")
+MQTT_PUB = os.environ.get("MQTT_PUB", "fido/image")
 FRIGATE_HOST = os.environ.get("FRIGATE_HOST", "http://10.10.1.110:5000")
 
 """
-This app uses Frigate and MQTT to display a snapshot on a tiny 
-display whenever someone is at my front door. 
-It was kind of a pain in the ass to set up because of weird
-documentation and apparently the wrath of elder gods.
+So, circuitPython doesn't handle JPG images, which is annoying.
+This program listens on MQTT, for any interesting events, fetches the image,
+crops it, and sends it back out via MQTT to be picked up by the Pico with a display
+that sits on my desk.
 
-This presumes you're running on a Raspberry Pi with a small ST7789 
-display wired up. The following is the wiring I used. 
-
-*NOTE*: these displays tend to use all sorts of names. For small
-"pico" style boards, you're going to need a different wiring config.
-Actual Raspberry Pis, however, use the SPI interface a fair bit more,
-so just wiring up to GPIO ports isn't going to cut it. 
-
-Raspberry Pis have two SPI channels 
-(visible as `/dev/spidev0.0` and `/dev/spidev0.1`) We're going to want to 
-use SPI 0.0. This means you want to use a few very specific pins. 
-See the `SPI0_*` listed below. The other GPIO pins can go to any other
-GPIO port depending on your desire for clean wiring. 
-
-Wiring:
-
-    st7789           pi
-    ---              ---
-    vcc -> purple -> 1 (3v3)
-    gnd -> white  -> 6 (Ground)
-    din -> green  -> 19 (GPIO10 SPI0_MOSI)
-    clk -> orange -> 23 (GPIO11 SPI0_SCLK)
-    cs  -> yellow -> 24 (GPIO08  SPI0_CE0)
-    dc  -> blue   -> 21 (GPIO09 SPI0_MISO)
-    rst -> brown  -> 22 (GPIO25)
-    bl  -> gray   -> 33 (GPIO33)
-
+The pico could absolutely do most of this, except that Frigate only generates JPGs
+and... well... here we are.
 """
 
 
-def show_img(camera, attention=2):
+def get_img(camera) -> bytes:
     """Show the latest snapshot from frigate for this camera"""
     log.debug(f"Getting image for {camera}")
     # fetch the image from my local Frigate server
@@ -70,19 +48,7 @@ def show_img(camera, attention=2):
     cropped = img.crop(CROP).resize((WIDTH, HEIGHT))
     log.info(f"""Woof: {camera}:: {time.strftime("%D %T")}""")
     log.debug(f"Woof: Image format: {img.format}, cropped to {cropped.size}")
-    if display:
-        # `display()` REALLY wants a PIL object. You could rewrite
-        # it to take a Wand object, I suppose, but meh...
-        display.display(cropped)
-        # Don't get your hopes up, this is a boolean value.
-        display.set_backlight(1)
-        # Long enough for me to notice and squint at it to see if
-        # it's worth paying attention to.
-        time.sleep(attention)
-        display.set_backlight(0)
-        return cropped
-    else:
-        cropped.show()
+    return cropped.tobytes()
 
 
 def on_connect(client, _userdata, _flags, _rc):
@@ -101,9 +67,11 @@ def on_message(client, _userdata, msg):
             f"""Got message {after.get("label","")}, {after.get("current_zones")}"""
         )
         camera = after["camera"]
-        if after["label"] == "person" and after["has_snapshot"]:
+        # if after["label"] == "person" and
+        if after["has_snapshot"]:
             # only bark if we can see someone.
-            attention = 0
+            attention = 1
+            """
             if "fido" in after.get("current_zones"):
                 attention = 2
             if "front_door" in after.get("current_zones"):
@@ -113,8 +81,25 @@ def on_message(client, _userdata, msg):
             if camera == "living_room" and not attention:
                 log.debug("it's not that interesting")
                 return
+            # """
             log.debug("It's interesting...")
-            show_img(camera, attention)
+            img_bytes = get_img(camera)
+            msg = json.dumps(
+                {"img": base64.b64encode(img_bytes).decode(), "attention": attention}
+            )
+            publish.single(
+                "fido/image",
+                payload=img_bytes,
+                hostname=MQTT_HOST,
+                auth={"username": MQTT_USER, "password": MQTT_PASS},
+            )
+            publish.single(
+                "fido/attention",
+                payload=attention,
+                hostname=MQTT_HOST,
+                auth={"username": MQTT_USER, "password": MQTT_PASS},
+            )
+            log.debug("Published image....")
 
 
 # main
@@ -123,30 +108,12 @@ logging.basicConfig(
     level=getattr(logging, os.environ.get("PYTHON_LOG", "ERROR").upper(), None)
 )
 log.info("Starting up...")
-display = ST7789(
-    port=0,
-    cs=0,
-    rst=25,
-    dc=9,
-    backlight=13,
-    width=WIDTH,
-    height=HEIGHT,
-    rotation=0,
-    spi_speed_hz=60 * 1000 * 1000,
-)
-# NOTE: do not do a `display.reset()` here. One has already been
-# called and it may prevent the display from showing anything.
-log.info("Turning off display")
-display.set_backlight(0)
-# log.info("Pulling a test image")
-# show_img("living_room")
 
-log.info(f"Starting up MQTT {MQTT_CREDS}")
-client = mqtt.Client()
-client.scr = display
+log.info(f"Starting up MQTT {MQTT_USER}:{MQTT_PASS}@{MQTT_HOST}")
+client = client.Client()
 client.on_connect = on_connect
 client.on_message = on_message
-client.username_pw_set(MQTT_CREDS[0], MQTT_CREDS[1])
+client.username_pw_set(MQTT_USER, MQTT_PASS)
 client.connect(host=MQTT_HOST)
 
 # Yep, this should absolutely use greelet or some other threading library.

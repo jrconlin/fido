@@ -63,3 +63,9 @@ Because I'm old.
 
 Who are you, Henry Henderson? 
 Look, this is a crap project I wrote to scratch an itch. I'm posting it because otherwise I'd forget about it and maybe someone else might find it useful. It's not going on my resume.
+
+# UPDATE
+
+So, turns out Pico Ws are kinda dumb. Also, circuitPython doesn't do JPGs. So I split Fido into two parts, `gidget` which is a tiny app meant to run on the Pico which listens for MQTT messages that contain an image to display and `ceasar` which does the work of listening to Frigate's MQTT, doing the image manipulation, and sending it to `gidget`. It should work great, except for the fact that the Pico running `gidget` quickly ran out of memory. 
+
+I've added both to this repository for the future.  

@@ -27,7 +27,8 @@ class FidoException(Exception):
     pass
 
 """
-This app runs on a Pico W with an ST7789 screen attached. (See wiring diagram below)
+This app runs on a Adafruit Feather ESP32S3 with an ST7789 screen attached.
+(See wiring diagram below)
 
 *NOTE*: these displays tend to use all sorts of names. For small
 "pico" style boards, you're going to need a different wiring config.
@@ -36,18 +37,40 @@ so just wiring up to GPIO ports isn't going to cut it.
 
 Wiring:
 
-    st7789           pico
+    st7789           ESP32s3 | PicoW
     ---              ---
-    vcc -> purple -> 36 (3v3)
-    gnd -> white  -> 18 (Ground)
-    din -> green  -> 15 (GPIO11)
-    clk -> orange -> 14 (GPIO10)
-    cs  -> yellow -> 19 (GPIO14)
-    dc  -> blue   -> 17 (GPIO13)
-    rst -> brown  -> 16 (GPIO12)
-    bl  -> gray   -> 20 (GPIO15)
+    vcc -> purple -> (3v3)
+    gnd -> white  -> (Ground)
+    din -> green  -> (MOSI | GPIO11)
+    clk -> orange -> (SCK  | GPIO10)
+    cs  -> yellow -> (D10  | GPIO14)
+    dc  -> blue   -> (MISO | GPIO13)
+    rst -> brown  -> (d9   | GPIO12)
+    bl  -> gray   -> (d6   | GPIO15)
 
 """
+def get_display():
+    displayio.release_displays()
+    board_type = os.uname().machine
+    print(f"# I am a {board_type}")
+    tft_din = board.MOSI # MOSI
+    tft_clk = board.SCK
+    tft_cs = board.D10 # FSPICS0
+    tft_dc = board.MISO
+    tft_rst = board.D9
+    tft_bl = board.D6 # Back Light
+    spi = busio.SPI(clock=tft_clk, MOSI=tft_din)
+
+    display_bus = displayio.FourWire(
+        spi, command=tft_dc, chip_select=tft_cs, reset=tft_rst
+    )
+
+    display = ST7789(display_bus, width=320, height=240, backlight_pin=tft_bl)
+    main = displayio.Group()
+    display.rotation = 1
+    # display.show(main)
+
+    return display
 
 
 def get_pool():
@@ -60,8 +83,9 @@ def get_pool():
     print(u"# Mac Addr: " + binascii.hexlify(wifi.radio.mac_address).decode())
     wifi.radio.connect(ssid=ssid, password=passw)
     # Not sure why, but need to hard code the ip address info.
+    print(f"# Setting addr {wifi.radio.ipv4_address}")
     if os.getenv("LOC_ADDR"):
-        print(f"# Setting addr {wifi.radio.ipv4_address}")
+        print(f"# Resetting addr {os.getenv("LOC_ADDR")}")
         wifi.radio.set_ipv4_address(
             ipv4=ipaddress.ip_address(os.getenv("LOC_ADDR")),
             netmask=ipaddress.ip_address(os.getenv("LOC_MASK")),
@@ -69,10 +93,15 @@ def get_pool():
             ipv4_dns=ipaddress.ip_address(os.getenv("LOC_DNS"))
         )
     # Test to see if you can reach the MQTT host.
-    if wifi.radio.ping(ipaddress.ip_address(MQTT_HOST)):
-        print("# Can access MQTT host")
-    else:
-        raise FidoException("Could not find MQTT Host")
+    for x in range(1,11):
+        if wifi.radio.ping(ipaddress.ip_address(MQTT_HOST)):
+            print("# Can access MQTT host")
+            break
+        else:
+            if x == 11:
+                raise FidoException(f"Could not find MQTT Host: {MQTT_HOST}")
+            print("# Waiting for network...")
+            time.sleep(1)
     pool = socketpool.SocketPool(wifi.radio)
     return pool
 
@@ -82,46 +111,21 @@ def on_connect(client, _userdata, _flags, _rc):
     print(f"# Connected to MQTT, subscribing to {MQTT_PUB}...")
     client.subscribe(MQTT_PUB)
 
-
 def on_message(client, _userdata, msg):
     """Run the gauntlet to see if we have something worth barking about
     NOTE: on PicoW MQTT runs out of memory trying to read this message.
+    On ESP32 boards, the base64 decode runs out of memory.
     """
-    payload = json.loads(msg.payload)
-    image = base64.b64decode(payload.img)
+    payload = json.loads(msg)
+    image = base64.b64decode(payload.get("img"))
     print(f"# Yip!")
-    display.display(image)
+    # display.display(image)
     # Don't get your hopes up, this is a boolean value.
-    display.set_backlight(1)
+    display.brightness=1
     # Long enough for me to notice and squint at it to see if
     # it's worth paying attention to.
     time.sleep(payload.attention)
-    display.set_backlight(0)
-
-
-def get_display():
-    displayio.release_displays()
-    board_type = os.uname().machine
-    print(f"# I am a {board_type}")
-    tft_din = board.GP11  # MOSI
-    tft_clk = board.GP10
-    tft_cs = board.GP14
-    tft_dc = board.GP13
-    tft_rst = board.GP12
-    tft_bl = board.GP15  # Back Light
-    spi = busio.SPI(clock=tft_clk, MOSI=tft_din)
-
-    display_bus = displayio.FourWire(
-        spi, command=tft_dc, chip_select=tft_cs, reset=tft_rst
-    )
-
-    display = ST7789(display_bus, width=320, height=240, backlight_pin=tft_bl)
-    main = displayio.Group()
-    display.rotation = 1
-    display.show(main)
-
-    return display
-
+    display.brightness=0
 
 # main
 
@@ -138,6 +142,7 @@ client = MQTT.MQTT(
 client.on_connect = on_connect
 client.on_message = on_message
 client.connect()
+display.brightness=0  # sometimes this is a function, sometimes it's a float. :shrug:
 
 print("# Connected, waiting for messages from Ceasar")
 while True:

@@ -45,7 +45,7 @@ def get_img(camera) -> bytes:
     img = Image.open(BytesIO(response.content))
     # My camera generates an image larger than we need, crop it down
     # to just the right hand side, since that's the interesting bit.
-    cropped = img.crop(CROP).resize((WIDTH, HEIGHT))
+    cropped = img.crop(CROP).resize((WIDTH, HEIGHT)).tobitmap()
     log.info(f"""Woof: {camera}:: {time.strftime("%D %T")}""")
     log.debug(f"Woof: Image format: {img.format}, cropped to {cropped.size}")
     return cropped.tobytes()
@@ -89,13 +89,7 @@ def on_message(client, _userdata, msg):
             )
             publish.single(
                 "fido/image",
-                payload=img_bytes,
-                hostname=MQTT_HOST,
-                auth={"username": MQTT_USER, "password": MQTT_PASS},
-            )
-            publish.single(
-                "fido/attention",
-                payload=attention,
+                payload=msg,
                 hostname=MQTT_HOST,
                 auth={"username": MQTT_USER, "password": MQTT_PASS},
             )
